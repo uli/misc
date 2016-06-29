@@ -1,0 +1,76 @@
+From d947450850cc48458d6c436af1f31f77c893a50e Mon Sep 17 00:00:00 2001
+From: Ulrich Hecht <ulrich.hecht+renesas@gmail.com>
+Date: Fri, 24 Jun 2016 15:43:10 +0200
+Subject: [PATCH] hack: add pin bias debugfs interface
+
+---
+ drivers/pinctrl/core.c | 32 ++++++++++++++++++++++++++++++++
+ 1 file changed, 32 insertions(+)
+
+diff --git a/drivers/pinctrl/core.c b/drivers/pinctrl/core.c
+index fb38e20..a18409a 100644
+--- a/drivers/pinctrl/core.c
++++ b/drivers/pinctrl/core.c
+@@ -24,6 +24,7 @@
+ #include <linux/sysfs.h>
+ #include <linux/debugfs.h>
+ #include <linux/seq_file.h>
++#include <linux/uaccess.h>
+ #include <linux/pinctrl/consumer.h>
+ #include <linux/pinctrl/pinctrl.h>
+ #include <linux/pinctrl/machine.h>
+@@ -1615,6 +1616,31 @@ static int pinctrl_open(struct inode *inode, struct file *file)
+ 	return single_open(file, pinctrl_show, NULL);
+ }
+ 
++static ssize_t pinctrl_bias_write(struct file *filp, const char __user *ubuf,
++				  size_t usize, loff_t *off)
++{
++	struct pinctrl_dev *pctldev;
++	const struct pinconf_ops *ops;
++	char tmp[usize];
++	long bias[1], pin;
++
++	if (copy_from_user(tmp, ubuf, usize))
++		return -EFAULT;
++	tmp[usize] = 0;
++
++	if (sscanf(tmp, "%ld %ld", &pin, &bias[0]) != 2)
++		return -EINVAL;
++
++	pctldev = (struct pinctrl_dev *)filp->f_inode->i_private;
++	ops = pctldev->desc->confops;
++	if (!ops->pin_config_set)
++		return -ENOTSUPP;
++
++	ops->pin_config_set(pctldev, pin, bias, 1);
++
++	return usize;
++}
++
+ static const struct file_operations pinctrl_pins_ops = {
+ 	.open		= pinctrl_pins_open,
+ 	.read		= seq_read,
+@@ -1657,6 +1683,10 @@ static const struct file_operations pinctrl_ops = {
+ 	.release	= single_release,
+ };
+ 
++static const struct file_operations pinctrl_bias_ops = {
++	.write		= pinctrl_bias_write,
++};
++
+ static struct dentry *debugfs_root;
+ 
+ static void pinctrl_init_device_debugfs(struct pinctrl_dev *pctldev)
+@@ -1678,6 +1708,8 @@ static void pinctrl_init_device_debugfs(struct pinctrl_dev *pctldev)
+ 			    device_root, pctldev, &pinctrl_groups_ops);
+ 	debugfs_create_file("gpio-ranges", S_IFREG | S_IRUGO,
+ 			    device_root, pctldev, &pinctrl_gpioranges_ops);
++	debugfs_create_file("bias", S_IFREG | S_IWUGO,
++			    device_root, pctldev, &pinctrl_bias_ops);
+ 	if (pctldev->desc->pmxops)
+ 		pinmux_init_device_debugfs(device_root, pctldev);
+ 	if (pctldev->desc->confops)
+-- 
+2.7.4
+
